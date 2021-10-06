@@ -1,0 +1,318 @@
+﻿@page "/"
+@using System.ComponentModel.DataAnnotations
+@using System.Text.Json
+@using System.Text.Json.Serialization
+
+<h1>Blender shift</h1>
+<div class="row">
+    <div class="col-6">
+
+        Shifts
+        <ul>
+            @foreach (var shift in _shifts)
+            {
+                <li> 
+                    @shift.Day.ToString("ddd d MMM") - @shift.Employee <button type="button" @onclick="() => No(shift)">No</button>
+                </li>
+            }
+        </ul>
+    </div>
+    <div class="col-6">
+        Balance
+        <table>
+            <tr>
+                <td></td>
+                <td>Total</td>
+                @foreach (var d in Enum.GetValues<DayOfWeek>())
+                {
+                    <td>
+                        @d.ToString()
+                    </td>
+                }
+            </tr>
+            @foreach (var emmployee in _employees)
+            {
+                <tr>
+                    <td>
+                        @emmployee.Name
+                    </td>
+                    <td>
+                        @emmployee.ShiftCount()
+                    </td>
+                    @foreach (var d in Enum.GetValues<DayOfWeek>())
+                    {
+                    <td>
+                        @emmployee.ShiftCountOnDayOfWeek(d)
+                    </td>
+                    }
+                </tr>
+            }
+        </table>
+
+        <fieldset>
+            <legend>Add employee</legend>
+            <EditForm Model="@_newEmployee" OnValidSubmit="@AddEmployee">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                <InputText id="name" @bind-Value="_newEmployee.Name" />
+                <InputText id="email" @bind-Value="_newEmployee.Email" />
+                <button type="submit">Add</button>
+            </EditForm>
+        </fieldset>
+        Employees :
+        @foreach (var employee in _employees)
+        {
+        <fieldset>
+            <EditForm Model="@employee" OnValidSubmit="() => { }">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                Name :
+                <InputText id="name" @bind-Value="employee.Name" />
+                <br />
+                Email : <InputText id="email" @bind-Value="employee.Email" />
+                <br />
+                Working Days
+                @foreach (var day in employee.DaysOfWeek)
+                {
+                    <InputCheckbox @bind-Value="@day.Selected"></InputCheckbox>
+                    @day.DayOfWeek
+                }
+                <br />
+                Vacations:
+                <br />
+                @foreach (var vacation in employee.Vacations)
+                {
+                    <text>Begin : </text>
+                    <InputDate id="begin" @bind-Value="vacation.Begin" />
+                    <text>End : </text>
+                    <InputDate id="end" @bind-Value="vacation.End" />
+                    <button type="button" @onclick="() => employee.Vacations.Remove(vacation)">Remove</button>
+                                                                                                                                <br />
+                    }
+                <button type="button" @onclick="() => employee.Vacations.Add(new Dates(DateTime.Today, DateTime.Today))">Add vacation</button>
+                <button type="button" @onclick="() => RemoveEmployee(employee)">Remove</button>
+            </EditForm>
+
+        </fieldset>
+        }
+        <fieldset>
+            <legend>Dates</legend>
+            <EditForm Model="@_dates" OnValidSubmit="() => ComputeShifts()">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                <InputDate id="begin" @bind-Value="_dates.Begin" />
+                <InputDate id="end" @bind-Value="_dates.End" />
+                <button type="submit">Compute</button>
+            </EditForm>
+        </fieldset>
+        <fieldset>
+            <legend>Import/Export</legend>
+            <textarea @bind="@importExport"></textarea>
+            <button type="button" @onclick="Import">Import</button>
+            <button type="button" @onclick="Export">Export</button>
+        </fieldset>
+    </div>
+</div>
+
+@code{ private String importExport;
+    private List<Shift> _shifts = new List<Shift>();
+    private Dates _dates = new Dates(DateTime.Now, DateTime.Now.AddDays(93));
+    private Employee _newEmployee = new Employee("", "");
+
+    private List<Employee> _employees = new List<Employee>()
+{
+        new Employee("test1", "test@gmail.com"),
+        new Employee("test2", "test2@gmail.com")
+    };
+
+    private void AddEmployee()
+    {
+        _employees.Add(_newEmployee);
+        _newEmployee = new Employee("", "");
+    }
+
+    private void RemoveEmployee(Employee employee)
+    {
+        _employees.Remove(employee);
+    }
+
+    private void ComputeShifts()
+    {
+        Console.WriteLine("ComputeShifts");
+        _shifts.Clear();
+        _employees.ForEach(e => e.ClearShifts());
+        foreach (var day in _dates.DatesEnumeration())
+        {
+            _shifts.Add(new Shift(day, FindBestEmployee(day)));
+        }
+    }
+
+    private void No(Shift shift)
+    {
+        shift.Employee.Vacations.Add(new Dates(shift.Day, shift.Day));
+        ComputeShifts();
+    }
+    private Employee FindBestEmployee(DateTime day)
+    {
+        return _employees.Where(e => e.CanWork(day))
+            .OrderBy(e => e.ShiftCountOnDayOfWeek(day.DayOfWeek))
+            .ThenBy(e => e.ShiftCount())
+            .FirstOrDefault();
+    }
+    protected void Export()
+    {
+        importExport = JsonSerializer.Serialize(new ImportExport { Dates = _dates, Employees = _employees, Shifts = _shifts });
+    }
+
+    protected void Import()
+    {
+        var dump = JsonSerializer.Deserialize<ImportExport>(importExport);
+        _employees = dump.Employees;
+        _shifts = dump.Shifts;
+        _dates = dump.Dates;
+        foreach (var s in _shifts)
+        {
+            var employee = _employees.First(e => e.Email == s.EmployeeEmail);
+            s.Employee = employee;
+            employee.AddShift(s);
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        ComputeShifts();
+        base.OnInitialized();
+    }
+
+    public class ImportExport
+    {
+        public List<Employee> Employees { get; set; }
+        public List<Shift> Shifts { get; set; }
+        public Dates Dates { get; set; }
+    }
+
+    public class DayOfWeekChoice
+    {
+        public DayOfWeekChoice() { }
+        public DayOfWeekChoice(DayOfWeek dayOfWeek, bool selected)
+        {
+            DayOfWeek = dayOfWeek;
+            Selected = selected;
+        }
+
+        public DayOfWeek DayOfWeek { get; set; }
+        public bool Selected { get; set; }
+    }
+
+    public class Shift
+    {
+        public Shift() { }
+        public Shift(DateTime day, Employee employee)
+        {
+            Day = day;
+            if (employee != null)
+            {
+                Employee = employee;
+                employee.AddShift(this);
+                EmployeeEmail = employee.Email;
+            }
+        }
+
+        public DateTime Day { get; set; }
+
+        [JsonIgnore]
+        public Employee Employee { get; set; }
+
+        public String EmployeeEmail { get; set; }
+
+        public void ChangeEmployee(Employee e)
+        {
+            if(Employee != null)
+                Employee.RemoveShift(this);
+            Employee = e;
+            EmployeeEmail = e.Email;
+            e.AddShift(this);
+
+        }
+    }
+
+    public class Dates
+    {
+        public Dates() { }
+        public Dates(DateTime begin, DateTime end)
+        {
+            Begin = begin;
+            End = end;
+        }
+
+        public IEnumerable<DateTime> DatesEnumeration()
+        {
+            for (DateTime i = Begin; i <= End; i = i.AddDays(1))
+            {
+                yield return i;
+            }
+        }
+
+        [Required]
+        public DateTime Begin { get; set; }
+
+        [Required]
+        public DateTime End { get; set; }
+    }
+
+    public class Employee
+    {
+        public Employee() { }
+        public List<Dates> Vacations { get; set; } = new List<Dates>();
+        public List<DayOfWeekChoice> DaysOfWeek { get; set; }
+        private List<Shift> shifts = new List<Shift>();
+
+        public Employee(string name, string email)
+        {
+            Name = name;
+            Email = email;
+            DaysOfWeek = Enum.GetValues<DayOfWeek>().Select(d => new DayOfWeekChoice(d, true)).ToList();
+        }
+
+        [Required]
+        public String Name { get; set; }
+
+        [Required]
+        [EmailAddress]
+        public String Email { get; set; }
+
+        public override string ToString()
+        {
+            return $"{nameof(Name)}: {Name}, {nameof(Email)}: {Email}";
+        }
+
+        public void AddShift(Shift shift)
+        {
+            this.shifts.Add(shift);
+        }
+
+        public void ClearShifts()
+        {
+            this.shifts.Clear();
+        }
+
+        public int ShiftCount()
+        {
+            return this.shifts.Count;
+        }
+
+        public bool CanWork(DateTime day)
+        {
+            return DaysOfWeek.First(d => d.DayOfWeek == day.DayOfWeek).Selected &&
+                Vacations.TrueForAll(v => day < v.Begin || day > v.End);
+        }
+
+        public int ShiftCountOnDayOfWeek(DayOfWeek day)
+        {
+            return shifts.Count(s => s.Day.DayOfWeek == day);
+        }
+        public void RemoveShift(Shift s)
+        {
+            shifts.Remove(s);
+        }
+    } }
